@@ -1,5 +1,21 @@
 Game.ItemMixins = {};
 
+Game.ItemMixins.Ammo = {
+    name: 'Ammo',
+    init: function(template) {
+        this._ammoType = template['ammoType'] || false;
+        this._ammoAOE = template['ammoAOE'] || 'line';
+    },
+    getAmmoType: function() {
+        return this._ammoType;
+    },
+    getAmmoAOE: function() {
+        return this._ammoAOE;
+    },
+};
+Game.ItemMixins.Artifact = {
+    name: 'Artifact'
+},
 Game.ItemMixins.Edible = {
     name: 'Edible',
     init: function(template) {
@@ -47,8 +63,8 @@ Game.ItemMixins.Equippable = {
         this._hands = template['hands'] || null; // or 1 or 2
         this._equipped = template['equipped'] || false;
     },
-    getAttackValue: function() {
-        return this.rollDice() + this._attackValue;
+    getAttackValue: function(max) {
+        return this.rollDice(max) + this._attackValue;
     },
     getDefenseValue: function() {
         return this._defenseValue;
@@ -74,15 +90,18 @@ Game.ItemMixins.Equippable = {
     unequipped: function() {
         this._equipped = false;
     },
-    rollDice: function() {
+    rollDice: function(max) {
         var dice = this._dice.split("d"),
             num = dice[0],
             sides = dice[1],
             total = 0;
 
-        for (var i = 0; i < num; i++) {
-            total += Math.floor(Math.random() * sides) + 1;
-        }
+        if(max)
+            total = num * sides;
+        else
+            for (var i = 0; i < num; i++)
+                total += Math.floor(Math.random() * sides) + 1;
+
         return total;
     },
     listeners: {
@@ -96,16 +115,16 @@ Game.ItemMixins.Stackable = {
     name: 'Stackable',
     init: function(template) {
         this._stackable = template['stackable'] || false;
-        this._count = template['count'] || 1;
+        this._count = template['count'] === undefined ? 1 : template['count'];
     },
     amount: function() {
         return this._count;
     },
     addToStack: function(amount) {
-        if(amount) {
+        if(typeof amount === "number") {
             this._count += amount;
         } else {
-            this._count++;    
+            this._count++;
         }
     },
     isStackable: function() {
@@ -125,20 +144,34 @@ Game.ItemMixins.UsesAmmo = {
     name: 'UsesAmmo',
     init: function(template) {
         this._clipSize = template['clipSize'] || 10;
-        this._ammoType = template['ammoType'] || 'lead bullet';
-        this._ammo = template['ammo'] || Game.ItemRepository.create(this._ammoType, { count: this._clipSize });
+        this._usesAmmoType = template['usesAmmoType'] || 'bullet';
+        this._defaultAmmo = template['defaultAmmo'] || 'lead bullet';
+        this._ammo = template['ammo'] || Game.ItemRepository.create(this._defaultAmmo, { count: this._clipSize });
     },
     getClipSize: function() {
         return this._clipSize;
     },
-    getAmmoType: function() {
-        return this._ammoType;
-    },
     getAmmo: function() {
         return this._ammo;
     },
+    getUsesAmmoType: function() {
+        return this._usesAmmoType;
+    },
+    getDefaultAmmo: function() {
+        return this._defaultAmmo;
+    },
     setAmmo: function(ammo) {
-        this._ammo = ammo;
+        var ammoObject;
+        if(typeof ammo === 'string')
+            ammoObject = Game.ItemRepository.create(ammo, { count: 0 });
+        else
+            ammoObject = ammo;
+
+        if(ammoObject.getAmmoType() !== this._usesAmmoType)
+            return false;
+
+        this._ammo = ammoObject;
+        return true;
     },
     addAmmo: function(amount) {
         this._ammo.addToStack(amount);

@@ -1,4 +1,13 @@
 Game.ItemRepository = new Game.Repository('items', Game.Item);
+Game.ItemRepository.getArtifacts = function() {
+    var artifacts = [];
+    for(var template in this._templates) {
+        this._templates[template].mixins.forEach(mixin => {
+            if(mixin.name == 'Artifact') artifacts.push(this._templates[template]);
+        });
+    }
+    return artifacts;
+};
 
 // Weapons
 Game.ItemRepository.define('knife', {
@@ -18,7 +27,7 @@ Game.ItemRepository.define('knife', {
 
 Game.ItemRepository.define('dagger', {
     name: 'dagger',
-    description: 'A bit stabbier than a knife, but not as good at spreading butter', 
+    description: 'A bit stabbier than a knife, but not as good at spreading butter',
     character: ')',
     foreground: Game.Palette.grey,
     dice: '1d4',
@@ -61,6 +70,34 @@ Game.ItemRepository.define('long sword', {
     disableRandomCreation: true
 });
 
+Game.ItemRepository.define('crude axe', {
+    name: 'crude axe',
+    character: '\\',
+    foreground: Game.Palette.grey,
+    dice: '1d6',
+    attackValue: 2,
+    statModifier: 'str',
+    type: 'melee',
+    hands: 1,
+    mixins: [Game.ItemMixins.Equippable]
+}, {
+    disableRandomCreation: true
+});
+
+Game.ItemRepository.define('oversized club', {
+    name: 'oversized club',
+    character: '\\',
+    foreground: Game.Palette.brown,
+    dice: '2d8',
+    attackValue: 0,
+    statModifier: 'str',
+    type: 'melee',
+    hands: 2,
+    mixins: [Game.ItemMixins.Equippable]
+}, {
+    disableRandomCreation: true
+});
+
 // Guns
 Game.ItemRepository.define('shotgun', {
     name: 'shotgun',
@@ -72,7 +109,8 @@ Game.ItemRepository.define('shotgun', {
     type: 'ranged',
     hands: 2,
     clipSize: 2,
-    ammoType: 'shotgun shell',
+    usesAmmoType: 'shotgun shell',
+    defaultAmmo: 'shotgun shell',
     mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.UsesAmmo]
 }, {
     disableRandomCreation: true
@@ -88,6 +126,7 @@ Game.ItemRepository.define('rifle', {
     type: 'ranged',
     hands: 2,
     clipSize: 6,
+    defaultAmmo: 'lead bullet',
     mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.UsesAmmo]
 }, {
     disableRandomCreation: true
@@ -103,7 +142,8 @@ Game.ItemRepository.define('bow', {
     type: 'ranged',
     hands: 2,
     clipSize: 1,
-    ammoType: 'arrow',
+    usesAmmoType: 'arrow',
+    defaultAmmo: 'wooden arrow',
     mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.UsesAmmo]
 }, {
     disableRandomCreation: true
@@ -118,6 +158,7 @@ Game.ItemRepository.define('pistol', {
     attackValue: 2,
     type: 'ranged',
     hands: 1,
+    defaultAmmo: 'lead bullet',
     mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.UsesAmmo]
 }, {
     disableRandomCreation: true
@@ -131,23 +172,45 @@ Game.ItemRepository.define('lead bullet', {
     attackValue: 1,
     count: 20,
     type: 'ammo',
+    ammoType: 'bullet',
     stackable: true,
-    mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.Stackable]
-}, {
-    disableRandomCreation: true
+    mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.Stackable, Game.ItemMixins.Ammo]
 });
 
-Game.ItemRepository.define('arrow', {
-    name: 'arrow',
+Game.ItemRepository.define('silver bullet', {
+    name: 'silver bullet',
+    character: ':',
+    foreground: Game.Palette.silver,
+    attackValue: 2,
+    count: 20,
+    type: 'ammo',
+    ammoType: 'bullet',
+    stackable: true,
+    mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.Stackable, Game.ItemMixins.Ammo]
+});
+
+Game.ItemRepository.define('wooden arrow', {
+    name: 'wooden arrow',
     character: '^',
     foreground: Game.Palette.brown,
     attackValue: 1,
-    count: 10,
+    count: 20,
     type: 'ammo',
+    ammoType: 'arrow',
     stackable: true,
-    mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.Stackable]
-}, {
-    disableRandomCreation: true
+    mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.Stackable, Game.ItemMixins.Ammo]
+});
+
+Game.ItemRepository.define('iron arrow', {
+    name: 'iron arrow',
+    character: '^',
+    foreground: Game.Palette.gunmetal,
+    attackValue: 2,
+    count: 20,
+    type: 'ammo',
+    ammoType: 'arrow',
+    stackable: true,
+    mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.Stackable, Game.ItemMixins.Ammo]
 });
 
 Game.ItemRepository.define('shotgun shell', {
@@ -157,10 +220,9 @@ Game.ItemRepository.define('shotgun shell', {
     attackValue: 2,
     count: 12,
     type: 'ammo',
+    ammoType: 'shotgun shell',
     stackable: true,
-    mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.Stackable]
-}, {
-    disableRandomCreation: true
+    mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.Stackable, Game.ItemMixins.Ammo]
 });
 
 // Throwables
@@ -216,10 +278,100 @@ Game.ItemRepository.define('balistic vest', {
     disableRandomCreation: true
 });
 
+Game.ItemRepository.define('rotted leather toga', {
+    name: 'rotted leather toga',
+    character: '[',
+    foreground: Game.Palette.brown,
+    slotLocations: ['body'],
+    defenseValue: 1,
+    mixins: [Game.ItemMixins.Equippable]
+});
+
+// Monster-only items
+Game.ItemRepository.define('zombie claw', {
+    name: 'zombie claws',
+    character: '^',
+    foreground: Game.Palette.grey,
+    dice: '1d4',
+    attackValue: 2,
+    statModifier: 'str',
+    type: 'melee',
+    hands: 1,
+    mixins: [Game.ItemMixins.Equippable]
+}, {
+    disableRandomCreation: true
+});
+Game.ItemRepository.define('werewolf claw', {
+    name: 'werewolf claws',
+    character: '^',
+    foreground: Game.Palette.grey,
+    dice: '1d6',
+    attackValue: 4,
+    statModifier: 'str',
+    type: 'melee',
+    hands: 1,
+    mixins: [Game.ItemMixins.Equippable]
+}, {
+    disableRandomCreation: true
+});
+Game.ItemRepository.define('vampire claw', {
+    name: 'vampire claws',
+    character: '^',
+    foreground: Game.Palette.purple,
+    dice: '2d6',
+    attackValue: 2,
+    statModifier: 'str',
+    type: 'melee',
+    hands: 1,
+    mixins: [Game.ItemMixins.Equippable]
+}, {
+    disableRandomCreation: true
+});
+Game.ItemRepository.define('werwolf fangs', {
+    name: 'werewolf fangs',
+    character: '^',
+    foreground: Game.Palette.bonewhite,
+    dice: '1d6',
+    attackValue: 0,
+    statModifier: 'str',
+    type: 'melee',
+    slotLocations: ['face'],
+    mixins: [Game.ItemMixins.Equippable]
+}, {
+    disableRandomCreation: true
+});
+Game.ItemRepository.define('vampire fangs', {
+    name: 'vampire fangs',
+    character: '^',
+    foreground: Game.Palette.bonewhite,
+    dice: '1d8',
+    attackValue: 0,
+    statModifier: 'str',
+    type: 'melee',
+    slotLocations: ['face'],
+    mixins: [Game.ItemMixins.Equippable]
+}, {
+    disableRandomCreation: true
+});
+
+Game.ItemRepository.define('wight chill', {
+    name: 'wight chill',
+    character: '&',
+    foreground: Game.Palette.bonewhite,
+    dice: '1d8',
+    attackValue: 4,
+    statModifier: 'str',
+    type: 'melee',
+    slotLocations: ['body'],
+    mixins: [Game.ItemMixins.Equippable]
+}, {
+    disableRandomCreation: true
+});
+
 //Artifacts
 Game.ItemRepository.define('Cavity Ridden Dragon Tooth', {
     name: 'Cavity Ridden Dragon Tooth',
-    description: 'This looks super dangerous. Also kinda gross.', 
+    description: 'This looks super dangerous. Also kinda gross.',
     character: ')',
     foreground: Game.Palette.yellow,
     dice: '4d4',
@@ -227,14 +379,14 @@ Game.ItemRepository.define('Cavity Ridden Dragon Tooth', {
     statModifier: 'dex',
     type: 'melee',
     hands: 1,
-    mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.Throwable]
+    mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.Throwable, Game.ItemMixins.Artifact]
 }, {
     disableRandomCreation: true
 });
 
 Game.ItemRepository.define('Extra Long Sword', {
     name: 'Extra Long Sword',
-    description: 'The mad genius who created this was probably compensating for somethihg', 
+    description: 'The mad genius who created this was probably compensating for something',
     character: '/',
     foreground: Game.Palette.gunmetal,
     dice: '3d8',
@@ -242,7 +394,7 @@ Game.ItemRepository.define('Extra Long Sword', {
     statModifier: 'str',
     type: 'melee',
     hands: 1,
-    mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.Throwable]
+    mixins: [Game.ItemMixins.Equippable, Game.ItemMixins.Throwable, Game.ItemMixins.Artifact]
 }, {
     disableRandomCreation: true
 });

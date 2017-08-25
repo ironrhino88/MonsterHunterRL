@@ -1,6 +1,79 @@
 // From http://www.codingcookies.com/2013/04/20/building-a-roguelike-in-javascript-part-4/
 Game.EntityMixins = {};
 
+// TODO: Implement functions for scanning for friends/enemies and getting the nearest of them
+Game.EntityMixins.AIActor = {
+    name: 'AIActor',
+    groupName: 'Actor',
+    init: function(template) {
+        // Load tasks
+        this._ai = template['ai'] || ['wander'];
+        this._behavior = template['behavior'] || 'aggressive';
+        this._target = template['target'] || null;
+        this._path = template['path'] || [];
+        this._friends = template['friends'] || [this.getName(), this.getType()];
+        this._enemies = template['enemies'] || ['player'];
+    },
+    act: function() {
+        // Iterate through all our behaviors
+        for (var i = 0; i < this._ai.length; i++) {
+            var success = Game.AI[this._ai[i]](this); // Do the AI behavior, passing in the entity
+
+            // If this was a success, then break out of the loop
+            if(success)
+                return true;
+
+        }
+    },
+    getBehavior: function() {
+        return this._behavior;
+    },
+    getTarget: function() {
+        return this._target;
+    },
+    getPath: function() {
+        return this._path;
+    },
+    getNextStep: function() {
+        return this._path.shift();
+    },
+    getFriends: function() {
+        return this._friends;
+    },
+    scanForFriends: function() {
+        var friends = [];
+        if(this.hasMixin('Sight')) {
+            var radius = this.getSightRadius();
+            var entities = this.getMap().getEntitiesWithinRadius(this.getX(), this.getY(), this.getZ(), radius);
+            for (var i = 0; i < entities.length; i++) {
+                if((this._friends.indexOf(entities[i].getName()) > -1 || this._friends.indexOf(entities[i].getType()) > -1) && this.canSee(entities[i]))
+                    friends.push(entities[i]);
+            }
+        }
+        return friends;
+    },
+    getEnemies: function() {
+        return this._enemies;
+    },
+    scanForEnemies: function() {
+        var enemies = [];
+        if(this.hasMixin('Sight')) {
+            var radius = this.getSightRadius();
+            var entities = this.getMap().getEntitiesWithinRadius(this.getX(), this.getY(), this.getZ(), radius);
+            for (var i = 0; i < entities.length; i++) {
+                if((this._enemies.indexOf(entities[i].getName()) > -1 || this._enemies.indexOf(entities[i].getType()) > -1) && this.canSee(entities[i]))
+                    enemies.push(entities[i]);
+            }
+        }
+        return enemies;
+    },
+    setTarget: function(target) {
+        this._target = target;
+    },
+    setPath: function(path) {
+        this._path = path;
+    },
+};
 Game.EntityMixins.CorpseDropper = {
     name: 'CorpseDropper',
     init: function(template) {
@@ -106,14 +179,23 @@ Game.EntityMixins.Equipper = {
             leftHand: null,
             body: null,
             head: null,
+            face: null,
             feet: null,
         };
+        this._meleeSlots = template['meleeSlots'] || [
+            'rightHand',
+            'leftHand'
+        ];
+         this._rangedSlots = template['rangedSlots'] || [
+            'rightHand',
+            'leftHand'
+        ];
 
         // If an entity starts with equipment, put the items in their designated slots
         if(template['equipment']) {
             for(var slot in template['equipment']) {
                 if(this._equipmentSlots[slot] === undefined)
-                    throw new Error('That slot is not defined');
+                    throw new Error('The ' + slot + ' slot is not defined');
 
                 this._equipmentSlots[slot] = Game.ItemRepository.create(template['equipment'][slot]);
             }
@@ -134,9 +216,23 @@ Game.EntityMixins.Equipper = {
     getSlot: function(slot) {
         return this._equipmentSlots[slot];
     },
+    getMeleeSlots: function() {
+        return this._meleeSlots;
+    },
+    getRangedSlots: function() {
+        return this._rangedSlots;
+    },
     hasRangedEquipped: function() {
         return (this._equipmentSlots.rightHand && this._equipmentSlots.rightHand.getType() === 'ranged') || 
             (this._equipmentSlots.leftHand && this._equipmentSlots.leftHand.getType() === 'ranged');
+    },
+    hasAmmo: function() {
+        for (var i = 0; i < this._rangedSlots.length; i++) {
+            var slotItem = this._equipmentSlots[this._rangedSlots[i]];
+            if(slotItem && slotItem.getAmmo() && slotItem.getAmmo().amount())
+                return true;
+        }
+        return false;
     },
     equip: function(item, slot) {
         // If an item is already in a given slot, try to put it in inventory or drop it
@@ -162,25 +258,52 @@ Game.EntityMixins.Equipper = {
             Game.sendMessage(this, "You equiped %s.", [item.describeA()]);
         }
     },
-    reload: function(slot) {
+    reload: function(slot, ammoName) {
         if(this._equipmentSlots[slot].hasMixin('UsesAmmo')) {
             var weapon = this._equipmentSlots[slot],
                 currAmmo = weapon.getAmmo(),
-                ammoType = weapon.getAmmoType(),
+                ammoType = weapon.getUsesAmmoType(),
                 clipSize = weapon.getClipSize(),
                 diff = clipSize,
                 items = this.getItems(),
-                successfulReload = false;
-            if(currAmmo)
+                successfulReload = false,
+                changingAmmo = false;
+
+            if(currAmmo) {
                 diff = clipSize - currAmmo.amount();
 
-            if(diff <= 0) {
+                // If no ammoName is specified, use what we're already using
+                if(!ammoName)
+                    ammoName = currAmmo.getName();
+            } else if(!ammoName) {
+                // If we don't have any ammo currently and aren't
+                // specifying a particular kind, look for the default
+                ammoName = weapon.getDefaultAmmo();
+            }
+
+            // Determine whether or not we are changing ammo types
+            changingAmmo = (ammoName !== currAmmo.getName());
+
+            // If the diff is less than 0 and we're not trying to put new ammo in, no need to reload
+            if(diff <= 0 && !changingAmmo) {
                 Game.sendMessage(this, "Your %s does not need to be reloaded", [weapon.describe()]);
                 return false;
             }
 
             for (var i = 0; i < items.length; i++) {
-                if(items[i] && items[i].hasMixin('Equippable') && items[i].getType() === 'ammo' && items[i].getName() === ammoType) {
+                // If we have ammo that matches the type our weapon needs and the kind we specified, attempt to reload
+                if(items[i] && items[i].hasMixin('Equippable') && items[i].getType() === 'ammo' && items[i].getAmmoType() === ammoType && items[i].getName() === ammoName) {
+                    if(changingAmmo) {
+                        // Put the current ammo (if any) in it's own stack back in our inventory and set the new ammo
+                        if(this.hasMixin('InventoryHolder')) {
+                            if(diff > 0)
+                                Game.sendMessage(this, "You unload %s %s and put them in your backback", [currAmmo.amount(), currAmmo.getName() + "s"]);
+                            this.addItem(currAmmo);
+                            this._equipmentSlots[slot].setAmmo(ammoName); // TODO: does this also change the inventory slot?
+                        }
+                        // Put a new clipsworth (if possible) of the new stuff in our weapon
+                        diff = clipSize;
+                    }
                     // Try to refill your weapon with only the amount that it needs, given the amount that you have
                     var ammoAmount = items[i].amount(),
                         realAmount = 0;
@@ -194,15 +317,18 @@ Game.EntityMixins.Equipper = {
                     this.removeItem(i, realAmount);
 
                     // And then update the ammo in the weapon
-                    this._equipmentSlots[slot].addAmmo(realAmount);
-                    Game.sendMessage(this, 'You reload %s with %s %s', [weapon.describeThe(), realAmount, ammoType + 's']);
+                    this._equipmentSlots[slot].addAmmo(realAmount, ammoName);
+                    Game.sendMessage(this, 'You reload %s with %s %s', [weapon.describeThe(), realAmount, ammoName + 's']);
                     successfulReload = true;
                     break;
                 }
             }
 
-            if(!successfulReload)
-                Game.sendMessage(this, 'You don\'t have any %s to reload your %s with.', [ammoType + 's', weapon.describeThe()]);
+            if(!successfulReload) {
+                Game.sendMessage(this, 'You don\'t have any %s to reload your %s with.', [ammoName + 's', weapon.describeThe()]);
+                return false
+            }
+            return true;
         }
     },
     unload: function(slot, amount) {
@@ -410,7 +536,7 @@ Game.EntityMixins.InventoryHolder = {
                     this._items[i] = item;
                     return true;
                 } else if(this._items[i].describe() == item.describe()) {
-                    this._items[i].addToStack();
+                    this._items[i].addToStack(item.amount());
                     return true;
                 }
             }
@@ -486,18 +612,24 @@ Game.EntityMixins.MeleeAttacker = {
     groupName: 'Attacker',
     init: function(template) {
         this._meleeAttackValue = template['meleeAttackValue'] || 1;
+        this._meleeAttackStyle = template['meleeAttackStyle'] || 'slot';
     },
-    getMeleeAttackValue: function(slot) {
-        var modifier = 0;
+    getMeleeAttackValue: function(slot, max) {
+        var max = max || false,
+            modifier = 0;
         // If we can equip items, then have to take into 
         // consideration weapon and armor
         if(this.hasMixin(Game.EntityMixins.Equipper)) {
             if(slot) {
-                var item = this.getSlot(slot),
-                    stat = item.getAttackStatModifier(),
+                var item = this.getSlot(slot);
+
+                if(!item)
+                    return 0;
+
+                var stat = item.getAttackStatModifier(),
                     statMod = this.getStat(stat) || 0;
 
-                return Math.round((item.getAttackValue() + (statMod / 2)) * Math.max(1, this.getLevel() / 2));
+                return Math.round((item.getAttackValue(max) + (statMod / 2)) * Math.max(1, this.getLevel() / 2));
             } else {
                 var equipment = this.getEquipment();
 
@@ -510,7 +642,7 @@ Game.EntityMixins.MeleeAttacker = {
                         modifier += item.getAttackValue();
 
                         if(stat)
-                            modifier *= Math.max(1, this.getStat(stat) / 2);
+                            modifier += Math.round(this.getStat(stat) / 2);
                     }
                 }
             }
@@ -518,20 +650,53 @@ Game.EntityMixins.MeleeAttacker = {
         // TODO: Add critical mod
         return this._meleeAttackValue + modifier;
     },
+    getMeleeAttackStyle: function() {
+        return this._meleeAttackStyle;
+    },
+    // TODO: Melee with more slots than just hands?
+    // TODO: Handle unarmed combat, or meleeing without melee weapons
     melee: function(target) {
         // Only remove the entity if they were attackable
-        if (target.hasMixin('Destructible')) {
-            var hit = this.attemptHit(target);
-            if(hit) {
-                var attack = this.getMeleeAttackValue();
-                var defense = target.getDefenseValue();
-                var total = Math.max(0, attack - defense);
-                Game.sendMessage(this, 'You strike the %s for %s damage!', [target.getName(), total]);
-                Game.sendMessage(target, 'The %s strikes you for %s damage!', [this.getName(), total]);
-                target.takeDamage(this, total);
+        if(target.hasMixin('Destructible')) {
+            var hit, attack, defense,
+                total = 0;
+            if(this._meleeAttackStyle == 'slot') {
+                var meleeSlots = this.getMeleeSlots();
+                for (var i = 0; i < meleeSlots.length; i++) {
+                    var slotItem = this.getSlot(meleeSlots[i]);
+                    if(!slotItem || slotItem.getType() !== 'melee')
+                        continue;
+
+                    hit = this.attemptHit(target);
+                    if(hit) {
+                        attack = this.getMeleeAttackValue(meleeSlots[i]);
+                        defense = target.getDefenseValue();
+                        total = Math.max(0, attack - defense);
+
+                        Game.sendMessage(this, 'You strike the %s for %s damage!', [target.getName(), total]);
+                        Game.sendMessage(target, 'The %s strikes you for %s damage!', [this.getName(), total]);
+
+                        target.takeDamage(this, total);
+                    } else {
+                        Game.sendMessage(this, 'You miss %s!', [target.describeThe()]);
+                        Game.sendMessage(target, '%s misses you!', [this.describeThe()]);
+                    }
+                }
             } else {
-                Game.sendMessage(this, 'You miss %s!', [target.describeThe()]);
-                Game.sendMessage(target, '%s misses you!', [this.describeThe()]);
+                hit = this.attemptHit(target);
+                if(hit) {
+                    attack = this.getMeleeAttackValue();
+                    defense = target.getDefenseValue();
+                    total = Math.max(0, attack - defense);
+
+                    Game.sendMessage(this, 'You attack the %s for %s damage!', [target.getName(), total]);
+                    Game.sendMessage(target, 'The %s attacks you for %s damage!', [this.getName(), total]);
+
+                    target.takeDamage(this, total);
+                } else {
+                    Game.sendMessage(this, 'You miss %s!', [target.describeThe()]);
+                    Game.sendMessage(target, '%s misses you!', [this.describeThe()]);
+                }
             }
         }
     },
@@ -628,9 +793,10 @@ Game.EntityMixins.RangedAttacker = {
     name: 'RangedAttacker',
     groupName: 'Attacker',
     init: function(template) {
-        this._rangedAttackValue = template['rangedAttackValue'] || 1;
+        this._rangedAttackValue = template['rangedAttackValue'] || 0;
+        this._rangedAttackStyle = template['rangedAttackStyle'] || 'slot'; // or 'all'; used mainly for AI stuff
     },
-    getRangedAttackValue: function(slot) {
+    getRangedAttackValue: function(slot, max) {
         // TODO: Add critical mod
         // If we can equip items, then have to take into 
         // consideration weapon and armor
@@ -638,10 +804,17 @@ Game.EntityMixins.RangedAttacker = {
             // If a slot is specified, only use that slot's stats + ammo
             if(slot) {
                 var item = this.getSlot(slot),
-                    ammoAttackValue = item.hasMixin('UsesAmmo') ? item.getAmmo().getAttackValue() : 0,
+                    ammo;
+                if(!item)
+                    return 0;
+
+                if(item.hasMixin('UsesAmmo'))
+                    ammo = item.getAmmo();
+
+                var ammoAttackValue = ammo ? ammo.getAttackValue(max) : 0,
                     stat = item.getAttackStatModifier(),
                     statMod = this.getStat(stat) || 0;
-                return Math.round((item.getAttackValue() + ammoAttackValue + (statMod / 2)) * Math.max(1, this.getLevel() / 2));
+                return Math.round((item.getAttackValue(max) + ammoAttackValue + (statMod / 2)) * Math.max(1, this.getLevel() / 2));
             } else {
                 var modifier = 0,
                     equipment = this.getEquipment();
@@ -652,38 +825,72 @@ Game.EntityMixins.RangedAttacker = {
                     if(type === 'ranged') {
                         var stat = item.getAttackStatModifier();
 
-                        modifier += item.getAttackValue();
+                        modifier += item.getAttackValue(max);
 
                         if(stat)
-                            modifier += this.getStat(stat);
+                            modifier += Math.round(this.getStat(stat) / 2);
                     }
                 }
                 return this._rangedAttackValue + modifier;
             }
         }        
     },
-    shoot: function(target, slot) {
-        if(this.getSlot(slot).hasMixin('UsesAmmo') && this.getSlot(slot).getAmmo().amount() <= 0) {
-            Game.sendMessage(this, "You don't have any ammunition");
-            return false;
-        }
-
-        // Remove 1 ammo...
-        this.unload(slot, 1);
-
+    getRangedAttackStyle: function() {
+        return this._rangedAttackStyle;
+    },
+    shoot: function(target) {
         // Only remove the entity if they were attackable
         if(target.hasMixin('Destructible')) {
-            var hit = this.attemptShot(target);
-            if(hit) {
-                var attack = this.getRangedAttackValue(slot);
-                var defense = target.getDefenseValue();
-                var total = Math.max(0, attack - defense);
-                Game.sendMessage(this, 'You shoot the %s for %s damage!', [target.getName(), total]);
-                Game.sendMessage(target, 'The %s shoots you for %s damage!', [this.getName(), total]);
-                target.takeDamage(this, total);
+            var attack, defense, hit,
+                total = 0;
+            if(this.getRangedAttackStyle() == 'slot') {
+                var rangedSlots = this.getRangedSlots();
+                for (var i = 0; i < rangedSlots.length; i++) {
+                    var slotItem = this.getSlot(rangedSlots[i]);
+
+                    if(!slotItem || slotItem.getType() !== 'ranged')
+                        continue;
+
+                    if(slotItem.hasMixin('UsesAmmo') && (slotItem.getAmmo() === false || slotItem.getAmmo().amount() <= 0)) {
+                        Game.sendMessage(this, "You don't have any ammunition for %s", [slotItem.describeThe()]);
+                        return false;
+                    }
+
+                    // Remove 1 ammo...
+                    // TODO: Support variable amount of ammo expendature
+                    this.unload(rangedSlots[i], 1);
+
+                    hit = this.attemptShot(target);
+                    if(hit) {
+                        attack = this.getRangedAttackValue(rangedSlots[i]);
+                        defense = target.getDefenseValue();
+                        total = Math.max(0, attack - defense);
+
+                        Game.sendMessage(this, 'You shoot the %s for %s damage!', [target.getName(), total]);
+                        Game.sendMessage(target, 'The %s shoots you for %s damage!', [this.getName(), total]);
+
+                        target.takeDamage(this, total);
+                    } else {
+                        Game.sendMessage(this, 'You miss %s!', [target.describeThe()]);
+                        Game.sendMessage(target, '%s misses you!', [this.describeThe()]);
+                    }
+                }
             } else {
-                Game.sendMessage(this, 'You miss %s!', [target.describeThe()]);
-                Game.sendMessage(target, '%s misses you!', [this.describeThe()]);
+                // TODO: Expend ammo somehow? This will generally be monsters using monster weapons, so maybe not
+                hit = this.attemptShot(target);
+                if(hit) {
+                    attack = this.getRangedAttackValue();
+                    defense = target.getDefenseValue();
+                    total = Math.max(0, attack - defense);
+
+                    Game.sendMessage(this, 'You shoot the %s for %s damage!', [target.getName(), total]);
+                    Game.sendMessage(target, 'The %s shoots you for %s damage!', [this.getName(), total]);
+
+                    target.takeDamage(this, total);
+                } else {
+                    Game.sendMessage(this, 'You miss %s!', [target.describeThe()]);
+                    Game.sendMessage(target, '%s misses you!', [this.describeThe()]);
+                }
             }
         } else {
             Game.sendMessage(this, 'You shoot the %s but they seem impervious to damage...', [target.getName()]);
@@ -751,78 +958,7 @@ Game.EntityMixins.Sight = {
         return found;
     }
 };
-Game.EntityMixins.TaskActor = {
-    name: 'TaskActor',
-    groupName: 'Actor',
-    init: function(template) {
-        // Load tasks
-        this._tasks = template['tasks'] || ['wander']; 
-    },
-    act: function() {
-        // Iterate through all our tasks
-        for (var i = 0; i < this._tasks.length; i++) {
-            if (this.canDoTask(this._tasks[i])) {
-                // If we can perform the task, execute the function for it.
-                this[this._tasks[i]]();
-                return;
-            }
-        }
-    },
-    // TODO: Tasks should have their own 'canDo' function and this should just do that
-    canDoTask: function(task) {
-        if (task === 'hunt') {
-            return this.hasMixin('Sight') && this.canSee(this.getMap().getPlayer());
-        } else if (task === 'wander') {
-            return true;
-        } else {
-            throw new Error('Tried to perform undefined task ' + task);
-        }
-    },
-    hunt: function() {
-        var player = this.getMap().getPlayer();
 
-        // If we are adjacent to the player, then attack instead of hunting.
-        // TODO: if I'm not mistaken, this enforces a topology 4 and doesn't account for diagnally adjacent
-        var offsets = Math.abs(player.getX() - this.getX()) + Math.abs(player.getY() - this.getY());
-        if(offsets === 1) {
-            if (this.hasMixin('MeleeAttacker')) {
-                this.melee(player);
-                return;
-            }
-        }
-
-        // Generate the path and move to the first tile.
-        var source = this;
-        var z = source.getZ();
-        var path = new ROT.Path.AStar(player.getX(), player.getY(), function(x, y) {
-            // If an entity is present at the tile, can't move there.
-            var entity = source.getMap().getEntityAt(x, y, z);
-            if (entity && entity !== player && entity !== source) {
-                return false;
-            }
-            return source.getMap().getTile(x, y, z).isWalkable();
-        }, {topology: 4});
-        // Once we've gotten the path, we want to move to the second cell that is
-        // passed in the callback (the first is the entity's strting point)
-        var count = 0;
-        path.compute(source.getX(), source.getY(), function(x, y) {
-            if (count == 1) {
-                source.tryMove(x, y, z);
-            }
-            count++;
-        });
-    },
-    wander: function() {
-        // Flip coin to determine if moving by 1 in the positive or negative direction
-        var moveOffset = (Math.round(Math.random()) === 1) ? 1 : -1;
-        // Flip coin to determine if moving in x direction or y direction
-        if (Math.round(Math.random()) === 1) {
-            this.tryMove(this.getX() + moveOffset, this.getY(), this.getZ());
-        } else {
-            this.tryMove(this.getX(), this.getY() + moveOffset, this.getZ());
-        }
-    }
-};
 Game.EntityMixins.Thrower = {
     name: 'Thrower',
     init: function(template) {
